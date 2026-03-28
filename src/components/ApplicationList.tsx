@@ -11,7 +11,18 @@ interface Props {
 
 export function ApplicationList({ applications, onSelect, onCreateNew, onDelete }: Props) {
   const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
+  const [sortBy, setSortBy] = useState<'created_at' | 'deadline'>('created_at');
   const [selectedQuestion, setSelectedQuestion] = useState<ApplicationQuestion | null>(null);
+
+  const sortedApplications = [...applications].sort((a, b) => {
+    if (sortBy === 'deadline') {
+      const dateA = a.deadline ? new Date(a.deadline).getTime() : Infinity;
+      const dateB = b.deadline ? new Date(b.deadline).getTime() : Infinity;
+      return dateA - dateB; // 오름차순 (마감일이 얼마 안 남은 순)
+    }
+    // 기본값: 최신 등록순 (created_at 내림차순)
+    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+  });
 
   const getStatusColor = (status: string = '') => {
     if (status.includes('최종 합격') || status.includes('서류 합격')) {
@@ -48,6 +59,15 @@ export function ApplicationList({ applications, onSelect, onCreateNew, onDelete 
                 <List className="w-6 h-6" />
               </button>
             </div>
+            {/* 정렬 필터 추가 */}
+            <select
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value as 'created_at' | 'deadline')}
+              className="px-4 py-2 border border-slate-200 rounded-lg text-sm font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-100 shadow-sm cursor-pointer hover:bg-slate-50 transition"
+            >
+              <option value="created_at">최신 등록순</option>
+              <option value="deadline">마감일 임박순</option>
+            </select>
           </div>
           <button
             onClick={onCreateNew}
@@ -57,7 +77,7 @@ export function ApplicationList({ applications, onSelect, onCreateNew, onDelete 
           </button>
         </div>
 
-        {applications.length === 0 ? (
+        {sortedApplications.length === 0 ? (
           <div className="text-center bg-white rounded-xl border border-slate-200 py-20 shadow-sm">
             <p className="text-slate-500 mb-5 text-lg font-medium">등록된 회사가 없습니다.</p>
             <button onClick={onCreateNew} className="text-indigo-600 text-base font-bold hover:underline">첫 회사 추가 &rarr;</button>
@@ -77,7 +97,7 @@ export function ApplicationList({ applications, onSelect, onCreateNew, onDelete 
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {applications.map((app) => (
+                {sortedApplications.map((app) => (
                   <tr key={app.id} className="hover:bg-slate-50 transition cursor-pointer group" onClick={() => onSelect(app)}>
                     <td className="px-6 py-5">
                       <span className={`px-3 py-1.5 rounded-md text-sm font-bold border ${getStatusColor(app.status)} inline-block`}>
@@ -152,7 +172,7 @@ export function ApplicationList({ applications, onSelect, onCreateNew, onDelete 
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
-            {applications.map((app) => (
+            {sortedApplications.map((app) => (
               <div key={app.id} className="bg-white rounded-xl border border-slate-200 shadow-sm hover:border-indigo-300 hover:shadow-md transition-all flex flex-col overflow-hidden group">
                 <div className="p-6 flex-1 flex flex-col">
                   {/* Card Header Status & Icon */}
