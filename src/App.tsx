@@ -1,14 +1,16 @@
 import { useState, useEffect } from 'react';
+import { Routes, Route, Link, useNavigate, useLocation } from 'react-router-dom';
 import { useApplications } from './hooks/useApplications';
 import { ApplicationList } from './components/ApplicationList';
 import { ApplicationForm } from './components/ApplicationForm';
+import { useSuggestionStore } from './store/useSuggestionStore';
 import type { Application } from './types';
-import { Loader2, LogOut } from 'lucide-react';
+import { Loader2, LogOut, Briefcase } from 'lucide-react';
 import { supabase } from './lib/supabase';
 import { Auth } from '@supabase/auth-ui-react';
 import { ThemeSupa } from '@supabase/auth-ui-shared';
 
-function Dashboard({ session }: { session: any }) {
+function AuthenticatedApp({ session }: { session: any }) {
   const { 
     applications, 
     loading, 
@@ -20,48 +22,64 @@ function Dashboard({ session }: { session: any }) {
     deleteQuestion
   } = useApplications(session);
   
-  const [selectedApp, setSelectedApp] = useState<Application | null>(null);
-  const [isCreating, setIsCreating] = useState(false);
+  const navigate = useNavigate();
+  const location = useLocation();
 
-  const handleSelect = (app: Application) => {
-    setSelectedApp(app);
-    setIsCreating(false);
-  };
-
-  const handleCreateNew = () => {
-    setSelectedApp(null);
-    setIsCreating(true);
-  };
-
-  const handleSaveApp = async (data: Partial<Application>) => {
-    if (selectedApp?.id) {
-      const updated = await updateApplication(selectedApp.id, data);
-      if (updated) setSelectedApp(updated); 
-      return updated;
+  const handleSaveApp = async (data: Partial<Application>, id?: number) => {
+    if (id) {
+      return await updateApplication(id, data);
     } else {
-      const created = await addApplication(data);
-      if (created) {
-        setIsCreating(false);
-        setSelectedApp(created); 
-      }
-      return created;
+      return await addApplication(data);
     }
-  };
-
-  const handleCancel = () => {
-    setIsCreating(false);
-    setSelectedApp(null);
   };
 
   const handleDeleteApp = async (id: number) => {
     if (window.confirm('정말 이 회사 항목과 포함된 모든 자소서를 삭제하시겠습니까?')) {
-      await deleteApplication(id);
+      const success = await deleteApplication(id);
+      if (success && location.pathname !== '/') {
+        navigate('/');
+      }
     }
   };
 
   const handleSignOut = async () => {
-    await supabase.auth.signOut();
+    try {
+      await supabase.auth.signOut();
+    } catch (error) {
+      console.warn("Logout API failed", error);
+    } finally {
+      // 가장 확실한 로그아웃 경험을 위해 로컬 스토리지를 모두 지우고 새로고침합니다.
+      // (토큰 만료 등으로 인해 로그아웃 상태가 꼬였을 때도 강제로 풀리게 됩니다.)
+      localStorage.clear();
+      sessionStorage.clear();
+      window.location.href = '/';
+    }
   };
+
+  const setSuggestions = useSuggestionStore(state => state.setSuggestions);
+
+  useEffect(() => {
+    const posSet = new Set<string>();
+    const topSet = new Set<string>();
+    const keySet = new Set<string>();
+    const matSet = new Set<string>();
+
+    applications.forEach(app => {
+      if (app.position?.trim()) posSet.add(app.position);
+      app.application_questions?.forEach(q => {
+        if (q.topic?.trim()) topSet.add(q.topic);
+        if (q.keyword?.trim()) keySet.add(q.keyword);
+        if (q.material?.trim()) matSet.add(q.material);
+      });
+    });
+
+    setSuggestions({
+      positions: Array.from(posSet),
+      topics: Array.from(topSet),
+      keywords: Array.from(keySet),
+      materials: Array.from(matSet),
+    });
+  }, [applications, setSuggestions]);
 
   if (loading) {
     return (
@@ -72,28 +90,26 @@ function Dashboard({ session }: { session: any }) {
     );
   }
 
-  const showEditor = isCreating || selectedApp;
-
   return (
     <div className="flex flex-col h-screen font-sans text-slate-900 overflow-hidden bg-slate-50">
       {/* Top Navigation / Header */}
       <header className="bg-slate-900 border-b border-slate-800 shrink-0 sticky top-0 z-20">
         <div className="w-full px-8 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-3.5 cursor-pointer" onClick={handleCancel}>
+          <Link to="/" className="flex items-center space-x-3.5 cursor-pointer hover:opacity-90 transition">
             <div className="w-10 h-10 bg-indigo-500 rounded-lg flex items-center justify-center shadow">
-              <span className="text-white font-bold text-xl leading-none">C</span>
+              <Briefcase className="w-6 h-6 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-white tracking-tight">ChwiPPo</h1>
-          </div>
+          </Link>
           
           <div className="flex items-center space-x-4">
-            {showEditor && (
-              <button 
-                onClick={handleCancel}
+            {location.pathname !== '/' && (
+              <Link
+                to="/"
                 className="text-sm font-semibold text-slate-300 hover:text-white transition bg-slate-800 hover:bg-slate-700 px-5 py-2.5 rounded-md flex items-center"
               >
                 ← 목록으로 돌아가기
-              </button>
+              </Link>
             )}
             <button 
               onClick={handleSignOut}
@@ -106,26 +122,35 @@ function Dashboard({ session }: { session: any }) {
         </div>
       </header>
 
-      {/* Main Content Area */}
-      {showEditor ? (
-        <ApplicationForm
-          initialData={isCreating ? null : selectedApp}
-          onSaveApp={handleSaveApp}
-          onCancel={handleCancel}
-          onAddQuestion={addQuestion}
-          onUpdateQuestion={updateQuestion}
-          onDeleteQuestion={deleteQuestion}
-          positionSuggestions={Array.from(new Set(applications.map(a => a.position).filter(p => typeof p === 'string' && p.trim() !== ''))) as string[]}
-          key={selectedApp?.id || 'new'}
-        />
-      ) : (
-        <ApplicationList
-          applications={applications}
-          onSelect={handleSelect}
-          onCreateNew={handleCreateNew}
-          onDelete={handleDeleteApp}
-        />
-      )}
+      {/* Main Content Routes */}
+      <Routes>
+        <Route path="/" element={
+          <ApplicationList
+            applications={applications}
+            onDelete={handleDeleteApp}
+          />
+        } />
+        
+        <Route path="/create" element={
+          <ApplicationForm
+            initialData={null}
+            onSaveApp={(data) => handleSaveApp(data)}
+            onAddQuestion={addQuestion}
+            onUpdateQuestion={updateQuestion}
+            onDeleteQuestion={deleteQuestion}
+          />
+        } />
+
+        <Route path="/edit/:id" element={
+          <ApplicationForm
+            applications={applications}
+            onSaveApp={handleSaveApp}
+            onAddQuestion={addQuestion}
+            onUpdateQuestion={updateQuestion}
+            onDeleteQuestion={deleteQuestion}
+          />
+        } />
+      </Routes>
     </div>
   );
 }
@@ -185,7 +210,7 @@ function App() {
         <div className="w-full max-w-md bg-white p-8 rounded-2xl shadow-sm border border-slate-100">
           <div className="flex flex-col items-center mb-8">
             <div className="w-12 h-12 bg-indigo-500 rounded-xl flex items-center justify-center shadow-md mb-4">
-              <span className="text-white font-bold text-2xl leading-none">C</span>
+              <Briefcase className="w-7 h-7 text-white" />
             </div>
             <h1 className="text-2xl font-bold text-slate-800 tracking-tight">ChwiPPo v.2</h1>
             <p className="text-slate-500 mt-2 text-sm">회원가입 후 자소서를 체계적으로 관리하세요.</p>
@@ -194,6 +219,7 @@ function App() {
             supabaseClient={supabase} 
             appearance={{ theme: ThemeSupa, variables: { default: { colors: { brand: '#4f46e5', brandAccent: '#4338ca' } } } }}
             providers={['google']}
+            onlyThirdPartyProviders={true}
             localization={{
               variables: {
                 sign_in: {
@@ -220,7 +246,7 @@ function App() {
     );
   }
 
-  return <Dashboard session={session} />;
+  return <AuthenticatedApp session={session} />;
 }
 
 export default App;

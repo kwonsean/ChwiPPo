@@ -1,38 +1,66 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import type { Application, ApplicationQuestion } from '../types';
-import { Calendar, Edit3, Trash2, Building2, LayoutGrid, List, FileSpreadsheet, X, HelpCircle, ExternalLink, FileText } from 'lucide-react';
+import { Calendar, Edit3, Trash2, Building2, LayoutGrid, List, FileSpreadsheet, ExternalLink, FileText, ChevronUp, ChevronDown } from 'lucide-react';
+import { QuestionDetailModal } from './modals/QuestionDetailModal';
+import { MemoDetailModal } from './modals/MemoDetailModal';
 
 interface Props {
   applications: Application[];
-  onSelect: (app: Application) => void;
-  onCreateNew: () => void;
   onDelete?: (id: number) => void;
 }
 
-export function ApplicationList({ applications, onSelect, onCreateNew, onDelete }: Props) {
-  const [viewMode, setViewMode] = useState<'grid' | 'table'>('grid');
-  const [sortBy, setSortBy] = useState<'created_at' | 'deadline'>('created_at');
+export function ApplicationList({ applications, onDelete }: Props) {
+  const navigate = useNavigate();
+  const [viewMode, setViewMode] = useState<'grid' | 'table'>('table');
+  
+  type SortField = 'created_at' | 'deadline' | 'status' | 'type' | 'company_name' | 'position';
+  type SortOrder = 'asc' | 'desc';
+  const [sortConfig, setSortConfig] = useState<{ field: SortField; order: SortOrder }>({ field: 'created_at', order: 'desc' });
   const [selectedQuestion, setSelectedQuestion] = useState<ApplicationQuestion | null>(null);
+  const [selectedMemoApp, setSelectedMemoApp] = useState<Application | null>(null);
+
+  const handleSort = (field: SortField) => {
+    setSortConfig(prev => ({
+      field,
+      order: prev.field === field && prev.order === 'asc' ? 'desc' : 'asc'
+    }));
+  };
 
   const sortedApplications = [...applications].sort((a, b) => {
-    if (sortBy === 'deadline') {
+    const { field, order } = sortConfig;
+    let comparison = 0;
+
+    if (field === 'created_at') {
+      comparison = new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+    } else if (field === 'deadline') {
       const dateA = a.deadline ? new Date(a.deadline).getTime() : Infinity;
       const dateB = b.deadline ? new Date(b.deadline).getTime() : Infinity;
-      return dateA - dateB; // 오름차순 (마감일이 얼마 안 남은 순)
+      comparison = dateA - dateB;
+    } else {
+      const valA = (a[field as keyof Application] || '').toString();
+      const valB = (b[field as keyof Application] || '').toString();
+      comparison = valA.localeCompare(valB, 'ko-KR');
     }
-    // 기본값: 최신 등록순 (created_at 내림차순)
-    return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+
+    return order === 'asc' ? comparison : -comparison;
   });
 
   const getStatusColor = (status: string = '') => {
-    if (status.includes('최종 합격') || status.includes('서류 합격')) {
-      return 'bg-emerald-50 text-emerald-700 border-emerald-200';
+    if (status.includes('최종 합격')) {
+      return 'bg-emerald-50 text-emerald-700 border-emerald-300 shadow-sm';
+    }
+    if (status.includes('서류 합격')) {
+      return 'bg-blue-50 text-blue-700 border-blue-200';
+    }
+    if (status.includes('불합격')) {
+      return 'bg-slate-100 text-slate-500 border-slate-200';
     }
     if (status.includes('작성중')) {
       return 'bg-amber-50 text-amber-700 border-amber-200';
     }
     if (status.includes('제출완료')) {
-      return 'bg-blue-50 text-blue-700 border-blue-200';
+      return 'bg-indigo-50 text-indigo-700 border-indigo-200';
     }
     return 'bg-slate-50 text-slate-700 border-slate-200';
   };
@@ -59,18 +87,9 @@ export function ApplicationList({ applications, onSelect, onCreateNew, onDelete 
                 <List className="w-6 h-6" />
               </button>
             </div>
-            {/* 정렬 필터 추가 */}
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as 'created_at' | 'deadline')}
-              className="px-4 py-2 border border-slate-200 rounded-lg text-sm font-semibold text-slate-600 focus:outline-none focus:ring-2 focus:ring-indigo-100 shadow-sm cursor-pointer hover:bg-slate-50 transition"
-            >
-              <option value="created_at">최신 등록순</option>
-              <option value="deadline">마감일 임박순</option>
-            </select>
           </div>
           <button
-            onClick={onCreateNew}
+            onClick={() => navigate('/create')}
             className="bg-indigo-600 text-white px-6 py-3 rounded-lg text-base font-semibold hover:bg-indigo-700 transition shadow-sm flex items-center"
           >
             <Edit3 className="w-5 h-5 mr-2" />새 회사 추가
@@ -80,49 +99,72 @@ export function ApplicationList({ applications, onSelect, onCreateNew, onDelete 
         {sortedApplications.length === 0 ? (
           <div className="text-center bg-white rounded-xl border border-slate-200 py-20 shadow-sm">
             <p className="text-slate-500 mb-5 text-lg font-medium">등록된 회사가 없습니다.</p>
-            <button onClick={onCreateNew} className="text-indigo-600 text-base font-bold hover:underline">첫 회사 추가 &rarr;</button>
+            <button onClick={() => navigate('/create')} className="text-indigo-600 text-base font-bold hover:underline">첫 회사 추가 &rarr;</button>
           </div>
         ) : viewMode === 'table' ? (
           <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-x-auto">
             <table className="w-full text-left border-collapse text-base text-slate-700 whitespace-nowrap">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-sm">
-                  <th className="px-6 py-4 w-32">상태</th>
-                  <th className="px-6 py-4">채용구분</th>
-                  <th className="px-6 py-4 min-w-[220px]">회사명</th>
-                  <th className="px-6 py-4">직무</th>
-                  <th className="px-6 py-4">마감일</th>
+                <tr className="bg-slate-50 border-b border-slate-200 text-slate-500 font-semibold uppercase tracking-wider text-sm select-none">
+                  {[
+                    { field: 'status', label: '상태', width: 'w-32' },
+                    { field: 'type', label: '채용구분', width: '' },
+                    { field: 'company_name', label: '회사명', width: 'min-w-[220px]' },
+                    { field: 'position', label: '직무', width: '' },
+                    { field: 'deadline', label: '마감일', width: '' },
+                  ].map(({ field, label, width }) => (
+                    <th 
+                      key={field} 
+                      className={`px-6 py-4 cursor-pointer hover:bg-slate-200/50 transition group ${width}`}
+                      onClick={() => handleSort(field as SortField)}
+                    >
+                      <div className="flex items-center">
+                        {label}
+                        <div className="ml-1.5 flex flex-col text-[10px] leading-[0.4] text-slate-300">
+                          <ChevronUp className={`w-3 h-3 ${sortConfig.field === field && sortConfig.order === 'asc' ? 'text-indigo-600' : 'group-hover:text-slate-400'}`} />
+                          <ChevronDown className={`w-3 h-3 -mt-[2px] ${sortConfig.field === field && sortConfig.order === 'desc' ? 'text-indigo-600' : 'group-hover:text-slate-400'}`} />
+                        </div>
+                      </div>
+                    </th>
+                  ))}
                   <th className="px-6 py-4 min-w-[320px]">등록된 문항</th>
                   <th className="px-6 py-4 w-28 text-center">동작</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {sortedApplications.map((app) => (
-                  <tr key={app.id} className="hover:bg-slate-50 transition cursor-pointer group" onClick={() => onSelect(app)}>
+                  <tr key={app.id} className="hover:bg-slate-50 transition cursor-pointer group" onClick={() => navigate(`/edit/${app.id}`)}>
                     <td className="px-6 py-5">
                       <span className={`px-3 py-1.5 rounded-md text-sm font-bold border ${getStatusColor(app.status)} inline-block`}>
                         {app.status || '-'}
                       </span>
                     </td>
                     <td className="px-6 py-5 text-slate-600 font-medium">{app.type || '-'}</td>
-                    <td className="px-6 py-5 text-lg font-bold text-slate-800">
-                      <div className="flex items-center gap-2">
-                        {app.company_name}
-                        {app.link && (
-                          <a 
-                            href={app.link} 
-                            target="_blank" 
-                            rel="noopener noreferrer" 
-                            onClick={e=>e.stopPropagation()} 
-                            className="text-slate-400 hover:text-indigo-600 transition shrink-0"
-                            title="공고 링크 열기"
-                          >
-                            <ExternalLink className="w-5 h-5" />
-                          </a>
-                        )}
+                    <td className="px-6 py-4">
+                      <div className="flex flex-col">
+                        <div className="flex items-center gap-2 text-lg font-bold text-slate-800">
+                          {app.company_name}
+                          {app.link && (
+                            <a 
+                              href={app.link} 
+                              target="_blank" 
+                              rel="noopener noreferrer" 
+                              onClick={e=>e.stopPropagation()} 
+                              className="text-slate-400 hover:text-indigo-600 transition shrink-0"
+                              title="공고 링크 열기"
+                            >
+                              <ExternalLink className="w-4 h-4" />
+                            </a>
+                          )}
+                        </div>
                         {app.memo && (
-                          <div className="text-amber-500 shrink-0" title={`메모: ${app.memo}`}>
-                            <FileText className="w-5 h-5" />
+                          <div 
+                            className="flex items-center mt-1 text-xs font-semibold text-purple-600 bg-purple-50 border border-purple-100/70 rounded px-2 py-1 w-max max-w-[200px] cursor-pointer hover:bg-purple-100 transition shadow-sm" 
+                            title="메모 전체보기"
+                            onClick={(e) => { e.stopPropagation(); setSelectedMemoApp(app); }}
+                          >
+                            <FileText className="w-3.5 h-3.5 mr-1 shrink-0" />
+                            <span className="truncate">{app.memo}</span>
                           </div>
                         )}
                       </div>
@@ -148,13 +190,7 @@ export function ApplicationList({ applications, onSelect, onCreateNew, onDelete 
                       )}
                     </td>
                     <td className="px-6 py-5">
-                      <div className="flex items-center justify-center space-x-2.5 opacity-0 group-hover:opacity-100 transition">
-                        <button 
-                          onClick={(e) => { e.stopPropagation(); onSelect(app); }}
-                          className="p-2 text-slate-400 hover:text-indigo-600 hover:bg-indigo-50 rounded"
-                        >
-                          <Edit3 className="w-5 h-5" />
-                        </button>
+                      <div className="flex items-center justify-center space-x-2.5 transition">
                         {onDelete && (
                           <button 
                             onClick={(e) => { e.stopPropagation(); app.id && onDelete(app.id); }}
@@ -196,11 +232,16 @@ export function ApplicationList({ applications, onSelect, onCreateNew, onDelete 
                   </div>
                   
                   {app.memo && (
-                    <div className="mb-5 bg-amber-50 p-3 rounded-md border border-amber-100/50">
-                      <h4 className="text-xs font-bold text-amber-600 uppercase tracking-widest mb-1 flex items-center">
-                        <FileText className="w-3.5 h-3.5 mr-1" /> 개인 메모
+                    <div 
+                      className="mb-5 bg-purple-50 p-3 rounded-md border border-purple-100/50 cursor-pointer hover:bg-purple-100/80 hover:border-purple-200 transition group/memo shadow-sm"
+                      onClick={(e) => { e.stopPropagation(); setSelectedMemoApp(app); }}
+                      title="메모 전체보기"
+                    >
+                      <h4 className="text-xs font-bold text-purple-600 uppercase tracking-widest mb-1.5 flex items-center justify-between">
+                        <span className="flex items-center"><FileText className="w-3.5 h-3.5 mr-1" /> 개인 메모</span>
+                        <ExternalLink className="w-3.5 h-3.5 opacity-0 group-hover/memo:opacity-100 transition" />
                       </h4>
-                      <p className="text-sm text-amber-800/80 line-clamp-2 leading-relaxed font-medium">
+                      <p className="text-sm text-purple-800/80 line-clamp-2 leading-relaxed font-medium">
                         {app.memo}
                       </p>
                     </div>
@@ -259,7 +300,7 @@ export function ApplicationList({ applications, onSelect, onCreateNew, onDelete 
                     </button>
                   )}
                   <button 
-                    onClick={() => onSelect(app)}
+                    onClick={() => navigate(`/edit/${app.id}`)}
                     className="px-4 py-2 text-slate-600 font-semibold text-sm border border-slate-200 bg-white hover:text-indigo-600 hover:border-indigo-200 hover:bg-indigo-50 rounded transition flex items-center shadow-sm"
                   >
                     편집 열기 <Edit3 className="w-4 h-4 ml-2" />
@@ -270,72 +311,19 @@ export function ApplicationList({ applications, onSelect, onCreateNew, onDelete 
           </div>
         )}
 
-        {/* Question Detail Modal Overlay */}
+        {/* Detail Modals */}
         {selectedQuestion && (
-          <div 
-            className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/40 backdrop-blur-[2px] p-4 sm:p-6" 
-            onClick={() => setSelectedQuestion(null)}
-          >
-            <div 
-              className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[85vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-200" 
-              onClick={e => e.stopPropagation()}
-            >
-              <div className="p-6 border-b border-slate-100 flex justify-between items-start bg-slate-50/50">
-                <div className="flex-1 mr-4">
-                  <div className="flex items-center space-x-3 mb-2">
-                    <span className="px-2.5 py-0.5 bg-indigo-100 text-indigo-700 font-bold text-xs rounded uppercase tracking-wider">상세 보기</span>
-                    <h3 className="text-xl font-bold text-slate-800 leading-tight">
-                      {selectedQuestion.question || '문항 제목 없음'}
-                    </h3>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setSelectedQuestion(null)} 
-                  className="p-2 hover:bg-slate-200 rounded-lg text-slate-400 hover:text-slate-700 transition"
-                  title="닫기"
-                >
-                  <X className="w-6 h-6"/>
-                </button>
-              </div>
-              
-              <div className="p-7 overflow-y-auto space-y-6 flex-1">
-                <div className="flex flex-wrap gap-2.5">
-                  <div className="px-3 py-1.5 bg-indigo-50 text-indigo-700 border border-indigo-100 rounded-lg text-sm font-semibold flex items-center shadow-sm">
-                    <span className="text-indigo-400 mr-1.5 text-xs uppercase tracking-wide">주제:</span> {selectedQuestion.topic || '-'}
-                  </div>
-                  <div className="px-3 py-1.5 bg-emerald-50 text-emerald-700 border border-emerald-100 rounded-lg text-sm font-semibold flex items-center shadow-sm">
-                    <span className="text-emerald-400 mr-1.5 text-xs uppercase tracking-wide">키워드:</span> {selectedQuestion.keyword || '-'}
-                  </div>
-                  <div className="px-3 py-1.5 bg-amber-50 text-amber-700 border border-amber-100 rounded-lg text-sm font-semibold flex items-center shadow-sm">
-                    <span className="text-amber-400 mr-1.5 text-xs uppercase tracking-wide">소재:</span> {selectedQuestion.material || '-'}
-                  </div>
-                  <div className="px-3 py-1.5 bg-slate-100 text-slate-700 border border-slate-200 rounded-lg text-sm font-semibold flex items-center shadow-sm">
-                    <span className="text-slate-400 mr-1.5 text-xs uppercase tracking-wide">제한:</span> {selectedQuestion.char_limit || '-'}자
-                  </div>
-                </div>
+          <QuestionDetailModal 
+            question={selectedQuestion} 
+            onClose={() => setSelectedQuestion(null)} 
+          />
+        )}
 
-                <div>
-                  <h4 className="text-sm font-bold text-slate-400 uppercase tracking-widest mb-3 flex items-center">
-                    <HelpCircle className="w-4 h-4 mr-1.5" /> 작성 내용
-                  </h4>
-                  <div className="bg-slate-50 p-6 rounded-xl border border-slate-200 shadow-inner">
-                    <p className="text-base text-slate-700 whitespace-pre-wrap leading-relaxed min-h-[120px]">
-                      {selectedQuestion.content || '아직 작성된 내용이 없습니다.'}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              
-              <div className="p-5 border-t border-slate-100 bg-white flex justify-end">
-                <button 
-                  onClick={() => setSelectedQuestion(null)}
-                  className="px-6 py-2.5 bg-slate-800 text-white text-base font-semibold rounded-lg hover:bg-slate-700 transition shadow-sm"
-                >
-                  닫기
-                </button>
-              </div>
-            </div>
-          </div>
+        {selectedMemoApp && (
+          <MemoDetailModal 
+            application={selectedMemoApp} 
+            onClose={() => setSelectedMemoApp(null)} 
+          />
         )}
       </div>
     </div>

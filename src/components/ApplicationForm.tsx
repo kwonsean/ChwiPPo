@@ -1,27 +1,35 @@
 import { useState, useEffect } from 'react';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
+import { useSuggestionStore } from '../store/useSuggestionStore';
 import type { Application, ApplicationQuestion } from '../types';
 import { Save, X, Activity, Plus, Trash2, ChevronDown, ChevronUp, Building2, Check, CheckCircle } from 'lucide-react';
 
 interface Props {
+  applications?: Application[];
   initialData?: Application | null;
-  onSaveApp: (data: Partial<Application>) => Promise<Application | null>;
-  onCancel: () => void;
+  onSaveApp: (data: Partial<Application>, id?: number) => Promise<Application | null>;
   onAddQuestion?: (data: Partial<ApplicationQuestion>) => Promise<ApplicationQuestion | null>;
   onUpdateQuestion?: (id: number, data: Partial<ApplicationQuestion>) => Promise<ApplicationQuestion | null>;
   onDeleteQuestion?: (id: number) => Promise<boolean>;
-  positionSuggestions?: string[];
 }
 
 export function ApplicationForm({ 
+  applications,
   initialData, 
   onSaveApp, 
-  onCancel,
   onAddQuestion,
   onUpdateQuestion,
   onDeleteQuestion,
-  positionSuggestions,
 }: Props) {
-  const [appData, setAppData] = useState<Partial<Application>>(initialData || {
+  const { id } = useParams();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const { positions: positionSuggestions, topics, keywords, materials } = useSuggestionStore();
+  
+  // URL 파라미터가 있을 경우 데이터 찾기 우선 (편집 모드)
+  const resolvedInitialData = initialData || (id && applications ? applications.find(a => a.id === Number(id)) : null);
+
+  const [appData, setAppData] = useState<Partial<Application>>(resolvedInitialData || {
     company_name: '',
     deadline: '',
     type: '신입',
@@ -32,22 +40,30 @@ export function ApplicationForm({
   });
 
   const [questions, setQuestions] = useState<ApplicationQuestion[]>(
-    initialData?.application_questions || []
+    resolvedInitialData?.application_questions || []
   );
 
   const [expandedQs, setExpandedQs] = useState<Record<number, boolean>>({});
   const [isSaved, setIsSaved] = useState(false);
-  const [showSuccessPopup, setShowSuccessPopup] = useState(false);
+  const [showSuccessPopup, setShowSuccessPopup] = useState(location.state?.showSuccessPopup || false);
 
   useEffect(() => {
-    if (initialData) {
-      setAppData(initialData);
-      setQuestions(initialData.application_questions || []);
-      if (initialData.application_questions?.length) {
-        setExpandedQs({ [initialData.application_questions[0].id]: true });
+    if (resolvedInitialData) {
+      setAppData(resolvedInitialData);
+      setQuestions(resolvedInitialData.application_questions || []);
+      if (resolvedInitialData.application_questions?.length) {
+        setExpandedQs({ [resolvedInitialData.application_questions[0].id]: true });
       }
     }
-  }, [initialData]);
+    
+    // Mount 시점에 팝업이 활성화되었다면 5초 뒤 종료 및 스크롤
+    if (location.state?.showSuccessPopup) {
+      setTimeout(() => setShowSuccessPopup(false), 5000);
+      setTimeout(() => {
+        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+      }, 100);
+    }
+  }, [resolvedInitialData, location.state]);
 
   const handleAppChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement | HTMLTextAreaElement>) => {
     setAppData((prev) => ({ ...prev, [e.target.name]: e.target.value }));
@@ -57,7 +73,7 @@ export function ApplicationForm({
     e.preventDefault();
     if (!appData.company_name) return alert('회사명을 입력해주세요.');
     const isNewCompany = !appData.id;
-    const savedApp = await onSaveApp(appData);
+    const savedApp = await onSaveApp(appData, appData.id);
     
     if (!savedApp) {
       alert("회사 정보 저장에 실패했습니다. (DB에 'link' 칼럼이 생성되었는지, 혹은 스키마 캐시 새로고침을 하셨는지 확인해주세요.)");
@@ -82,23 +98,20 @@ export function ApplicationForm({
 
     setIsSaved(true);
     if (isNewCompany) {
-      setShowSuccessPopup(true);
-      setTimeout(() => setShowSuccessPopup(false), 5000);
-      setTimeout(() => {
-        window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
-      }, 100);
+      // 부드럽게 /edit/:id 로 라우팅 전환 (location state 전달로 팝업 유지)
+      navigate(`/edit/${savedApp.id}`, { replace: true, state: { showSuccessPopup: true } });
     } else {
       setTimeout(() => setIsSaved(false), 2500);
     }
   };
 
   const createEmptyQuestion = async () => {
-    if (!initialData?.id || !onAddQuestion) {
+    if (!appData.id || !onAddQuestion) {
       alert("먼저 회사 정보를 저장해 주세요.");
       return;
     }
     const newQ = await onAddQuestion({
-      application_id: initialData.id,
+      application_id: appData.id,
       question: '새로운 문항',
       content: '',
       char_limit: '1000'
@@ -140,16 +153,9 @@ export function ApplicationForm({
           <div className="px-6 py-4 border-b border-slate-100 flex flex-col md:flex-row justify-between items-start md:items-center bg-slate-50/50 gap-4">
             <h2 className="text-xl font-bold text-slate-800 flex items-center">
               <Building2 className="w-6 h-6 text-indigo-500 mr-2.5" />
-              {initialData ? '지원 회사 상세 정보 편집' : '새 지원 회사 등록'}
+              {resolvedInitialData ? '지원 회사 상세 정보 편집' : '새 지원 회사 등록'}
             </h2>
             <div className="flex space-x-3 w-full md:w-auto">
-              <button
-                type="button"
-                onClick={onCancel}
-                className="flex-1 md:flex-none px-5 py-2.5 border border-slate-200 text-slate-600 text-base font-semibold rounded-lg bg-white hover:bg-slate-50 transition flex items-center justify-center shadow-sm"
-              >
-                <X className="w-5 h-5 mr-1.5" />목록
-              </button>
               <button
                 type="submit"
                 className={`flex-1 md:flex-none px-5 py-2.5 text-white text-base font-bold rounded-lg transition flex items-center justify-center shadow-sm ${isSaved ? 'bg-emerald-500 hover:bg-emerald-600' : 'bg-indigo-600 hover:bg-indigo-700'}`}
@@ -271,7 +277,7 @@ export function ApplicationForm({
         </form>
 
         {/* Questions List */}
-        {!initialData?.id ? (
+        {!appData.id ? (
           <div className="bg-white border border-slate-200 rounded-xl p-12 text-center shadow-sm">
             <Activity className="w-12 h-12 text-slate-300 mx-auto mb-5" />
             <p className="text-base font-medium text-slate-500">회사 정보를 저장하시면 문항 추가 기능이 활성화됩니다.</p>
@@ -341,6 +347,15 @@ export function ApplicationForm({
                             onChange={(e) => updateQuestionData(idx, 'topic', e.target.value)}
                             className="w-full px-3.5 py-2.5 text-base border border-slate-300 rounded-md focus:border-indigo-500 outline-none"
                           />
+                          {topics.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-2.5">
+                              {topics.slice(0, 5).map(t => (
+                                <button key={t} type="button" onClick={() => updateQuestionData(idx, 'topic', t)} className="px-2 py-1 text-xs font-bold bg-white text-slate-500 border border-slate-200 rounded-md hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition shadow-sm">
+                                  {t}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <div>
                           <label className="block text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">키워드</label>
@@ -350,6 +365,15 @@ export function ApplicationForm({
                             onChange={(e) => updateQuestionData(idx, 'keyword', e.target.value)}
                             className="w-full px-3.5 py-2.5 text-base border border-slate-300 rounded-md focus:border-indigo-500 outline-none"
                           />
+                          {keywords.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-2.5">
+                              {keywords.slice(0, 5).map(k => (
+                                <button key={k} type="button" onClick={() => updateQuestionData(idx, 'keyword', k)} className="px-2 py-1 text-xs font-bold bg-white text-slate-500 border border-slate-200 rounded-md hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition shadow-sm">
+                                  {k}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <div>
                           <label className="block text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">대표 소재</label>
@@ -359,6 +383,15 @@ export function ApplicationForm({
                             onChange={(e) => updateQuestionData(idx, 'material', e.target.value)}
                             className="w-full px-3.5 py-2.5 text-base border border-slate-300 rounded-md focus:border-indigo-500 outline-none"
                           />
+                          {materials.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mt-2.5">
+                              {materials.slice(0, 5).map(m => (
+                                <button key={m} type="button" onClick={() => updateQuestionData(idx, 'material', m)} className="px-2 py-1 text-xs font-bold bg-white text-slate-500 border border-slate-200 rounded-md hover:bg-indigo-50 hover:text-indigo-600 hover:border-indigo-200 transition shadow-sm">
+                                  {m}
+                                </button>
+                              ))}
+                            </div>
+                          )}
                         </div>
                         <div>
                           <label className="block text-sm font-bold text-slate-500 mb-2 uppercase tracking-wider">자수 제한</label>
